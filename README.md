@@ -24,7 +24,20 @@ php artisan crm:importar-articulos <ruta>/blog_posts.json   # importa artículos
 php artisan crm:exportar-articulos <carpeta>                # exporta los aprobados a .md con el formato de la web
 php artisan crm:importar-redes <ruta>/social/linkedin       # piezas y calendario de LinkedIn (no pisa las existentes)
 php artisan crm:importar-documentos <carpeta de negocio>    # biblioteca de documentos de solo lectura (lista cerrada de rutas)
+php artisan crm:purgar-mensajes                             # borra mensajes vencidos (solo si hay plazo definido)
 ```
+
+## Bandeja de mensajes del formulario
+
+Apagada por defecto. Se activa en el `.env` **del servidor** (nunca en el repositorio ni en el chat), solo después de la revisión legal:
+
+```
+INBOX_ENABLED=true
+INBOX_KEY=<clave larga y aleatoria creada por Jamir>
+INBOX_RETENTION_DAYS=<plazo que fije el abogado>
+```
+
+El servidor de la web envía `POST /api/contacto` con la cabecera `X-Inbox-Key`. Sin consentimiento aceptado no se guarda nada.
 
 ## Reglas
 

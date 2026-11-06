@@ -11,7 +11,7 @@ class CompanyProfileForm
 {
     public static function configure(Schema $schema): Schema
     {
-        return $schema->components([
+        return $schema->columns(1)->components([
             Section::make('Identidad')
                 ->description('Se usa en los textos legales, facturas y el pie de la web. Solo datos confirmados.')
                 ->columns(2)
