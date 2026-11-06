@@ -16,6 +16,14 @@ php artisan serve
 
 Entrar en `http://127.0.0.1:8000/admin`. En el primer acceso el panel pide configurar la verificación en dos pasos.
 
+## Comandos del blog
+
+```bash
+php artisan db:seed --class=CompanyProfileSeeder            # datos confirmados de la empresa (no pisa lo existente)
+php artisan crm:importar-articulos <ruta>/blog_posts.json   # importa artículos (no pisa los existentes)
+php artisan crm:exportar-articulos <carpeta>                # exporta los aprobados a .md con el formato de la web
+```
+
 ## Reglas
 
 - Nunca guardar contraseñas, claves ni datos reales de clientes en el repositorio (`.env` está ignorado).
