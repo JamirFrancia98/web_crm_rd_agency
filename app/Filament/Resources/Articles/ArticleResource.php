@@ -32,6 +32,12 @@ class ArticleResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'titulo';
 
+    /** El revisor legal lee y marca la revisión legal; no crea artículos. */
+    public static function canCreate(): bool
+    {
+        return auth()->user()?->role !== \App\Enums\UserRole::Legal;
+    }
+
     /** Los artículos no se borran: se descartan y queda el historial. */
     public static function canDelete(Model $record): bool
     {

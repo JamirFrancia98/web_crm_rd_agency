@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Articles\Schemas;
 
+use App\Enums\UserRole;
 use App\Models\Article;
 use App\Services\Blog\ArticleGate;
 use App\Support\BlogCatalog as C;
@@ -16,6 +17,7 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\View;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 
@@ -23,7 +25,8 @@ class ArticleForm
 {
     public static function configure(Schema $schema): Schema
     {
-        $bloqueado = fn (?Article $record): bool => (bool) $record?->isLocked();
+        // Bloqueado: aprobado/publicado, o quien solo revisa lo legal (lee, no edita el texto).
+        $bloqueado = fn (?Article $record): bool => (bool) $record?->isLocked() || auth()->user()?->role === UserRole::Legal;
 
         return $schema->components([
             // Estado y lista de pendientes: lo primero que ve quien revisa.
@@ -37,9 +40,15 @@ class ArticleForm
                             C::BORRADOR => 'gray', C::EN_REVISION => 'warning', C::APROBADO => 'success', C::PUBLICADO => 'info', default => 'danger',
                         }),
                     TextEntry::make('bloqueado')->label('Edición')
-                        ->state('Bloqueada: lo aprobado es lo que se revisó. Para cambiar algo, usa «Retirar aprobación».')
+                        ->state(fn (?Article $record) => $record?->estado === C::PUBLICADO
+                            ? 'Bloqueada: el artículo está publicado. Para corregirlo usa «Despublicar para editar»; después hay que volver a aprobarlo y a marcarlo como publicado.'
+                            : 'Bloqueada: lo aprobado es lo que se revisó. Para cambiar algo, usa «Retirar aprobación».')
                         ->color('warning')
-                        ->visible(fn (?Article $record) => $bloqueado($record)),
+                        ->visible(fn (?Article $record) => (bool) $record?->isLocked()),
+                    TextEntry::make('solo_lectura')->label('Edición')
+                        ->state('Tu rol (revisor legal) puede leer el artículo y marcar la revisión legal, pero no editar el texto.')
+                        ->color('gray')
+                        ->visible(fn (?Article $record) => $record && ! $record->isLocked() && auth()->user()?->role === UserRole::Legal),
                     TextEntry::make('problemas')->label('Falta para poder aprobarlo')
                         ->state(fn (?Article $record) => $record && ! $record->isLocked() ? ArticleGate::problems($record->load('sources'), paraAprobar: true) : [])
                         ->listWithLineBreaks()->bulleted()->color('danger')
@@ -79,6 +88,13 @@ class ArticleForm
                         ->helperText('Lo que muestra Google. Ideal: hasta 60 caracteres.'),
                     Textarea::make('meta_description')->label('Meta descripción')->rows(3)->maxLength(300)
                         ->helperText('Ideal: entre 120 y 160 caracteres, sin promesas que no se puedan probar.'),
+                    Section::make('Al compartir en redes')->description('Lo que se ve cuando alguien comparte el enlace (miniatura, título y descripción). Vacío = se usa el título y la descripción del artículo.')->columns(1)->schema([
+                        TextInput::make('og_title')->label('Título para redes')->maxLength(90)->live(onBlur: true)
+                            ->helperText('Ideal: hasta 60 caracteres.'),
+                        Textarea::make('og_description')->label('Descripción para redes')->rows(2)->maxLength(200)->live(onBlur: true)
+                            ->helperText('Ideal: entre 100 y 160 caracteres.'),
+                        View::make('filament.articles.share-preview'),
+                    ]),
                     Section::make('Palabra clave')->columns(2)->schema([
                         TextInput::make('keyword_oficial')->label('Palabra clave oficial')->maxLength(160)
                             ->placeholder('Pendiente')->helperText('La fija Web y SEO tras validar el volumen. No inventes volúmenes.'),
@@ -106,8 +122,8 @@ class ArticleForm
                             ->state(fn (?Article $record) => ($record?->robots ?? 'noindex,nofollow').' — pasa a index,follow solo al marcarlo como publicado.'),
                     ]),
                     Section::make('Imagen de portada')->columns(3)->schema([
-                        TextInput::make('imagen_src')->label('Ruta en la web')->maxLength(300)->placeholder('/img/blog/mi-articulo.webp')
-                            ->helperText('1920×1080, WebP, menos de 200 KB, sin texto dentro. Vacío = arte por defecto.'),
+                        TextInput::make('imagen_src')->label('Ruta en la web')->maxLength(300)->placeholder('/img/blog/mi-articulo.webp')->live(onBlur: true)
+                            ->helperText('1920×1080, WebP, menos de 200 KB, sin texto dentro. Es la miniatura al compartir: sin ella no se puede marcar como publicado.'),
                         TextInput::make('imagen_alt')->label('Texto alternativo')->maxLength(200),
                         TextInput::make('imagen_licencia')->label('Licencia o herramienta')->maxLength(200)
                             ->helperText('Obligatoria si hay imagen.'),
@@ -130,8 +146,11 @@ class ArticleForm
                 Tab::make('Riesgo y pruebas')->icon('heroicon-o-shield-check')->schema([
                     Section::make('Riesgo legal')->columns(2)->schema([
                         Select::make('riesgo_legal')->label('Riesgo legal')->options(C::RIESGOS)->required()->default('ninguno')->live(),
-                        Select::make('revision_legal')->label('Revisión legal')->options(C::REVISIONES_LEGALES)->required()->default('no-requerida')
-                            ->helperText('Con riesgo distinto de «Ninguno», debe estar «Aprobada» para aprobar el artículo.'),
+                        // Solo lectura: la cambia el revisor legal o el administrador con la acción «Revisión legal» (queda en el historial).
+                        TextEntry::make('revision_legal_info')->label('Revisión legal')
+                            ->state(fn (?Article $record) => C::REVISIONES_LEGALES[$record?->revision_legal ?? 'no-requerida'] ?? '—')
+                            ->badge()
+                            ->helperText('Con riesgo distinto de «Ninguno», debe estar «Aprobada» para aprobar el artículo. La marca el revisor legal.'),
                     ]),
                     Section::make('Pruebas')->columns(2)->schema([
                         Toggle::make('cifras_propias')->label('Cita cifras propias de RD')->live(),
@@ -144,6 +163,10 @@ class ArticleForm
                             ->helperText('Qué aporta RD que no está en las fuentes. Obligatorio para aprobar.'),
                         Toggle::make('generado_con_ia')->label('Redactado con ayuda de IA (dato interno)')->default(true),
                     ]),
+                ]),
+
+                Tab::make('Vista previa')->icon('heroicon-o-eye')->schema([
+                    View::make('filament.articles.markdown-preview'),
                 ]),
 
                 Tab::make('Revisión')->icon('heroicon-o-clipboard-document-check')->schema([

@@ -28,6 +28,8 @@ final class ArticleWorkflow
             'devolver_a_borrador' => ['from' => [C::EN_REVISION], 'to' => C::BORRADOR, 'roles' => $revisan, 'label' => 'Devolver a borrador', 'nota' => true],
             'retirar_aprobacion' => ['from' => [C::APROBADO], 'to' => C::EN_REVISION, 'roles' => $revisan, 'label' => 'Retirar aprobación', 'nota' => true],
             'publicar' => ['from' => [C::APROBADO], 'to' => C::PUBLICADO, 'roles' => [UserRole::Admin], 'label' => 'Marcar como publicado', 'nota' => false],
+            // Para editar algo ya publicado: se retira la publicación, se edita, se vuelve a aprobar y a publicar.
+            'despublicar' => ['from' => [C::PUBLICADO], 'to' => C::EN_REVISION, 'roles' => $revisan, 'label' => 'Despublicar para editar', 'nota' => true],
             'descartar' => ['from' => [C::BORRADOR, C::EN_REVISION, C::APROBADO], 'to' => C::DESCARTADO, 'roles' => $revisan, 'label' => 'Descartar', 'nota' => true],
             'reabrir' => ['from' => [C::DESCARTADO], 'to' => C::BORRADOR, 'roles' => [UserRole::Admin], 'label' => 'Reabrir como borrador', 'nota' => false],
         ];
@@ -68,6 +70,10 @@ final class ArticleWorkflow
 
         switch ($accion) {
             case 'aprobar':
+                // Quien escribe un artículo no lo aprueba (regla editorial). El administrador está exento.
+                if ($a->created_by !== null && $a->created_by === $user->id && ! $user->isAdmin()) {
+                    throw new DomainException('Quien escribe un artículo no lo aprueba: pídeselo a otra persona.');
+                }
                 $problemas = ArticleGate::problems($a, paraAprobar: true);
                 if ($problemas) {
                     throw new DomainException("No se puede aprobar:\n- ".implode("\n- ", $problemas));
@@ -82,6 +88,10 @@ final class ArticleWorkflow
                 if (! $fechaPublicacion || ! self::fechaValida($fechaPublicacion)) {
                     throw new DomainException('Indica la fecha de publicación (AAAA-MM-DD).');
                 }
+                // La portada es la miniatura al compartir en redes: sin ella no se marca como publicado.
+                if (blank($a->imagen_src)) {
+                    throw new DomainException('Falta la imagen de portada: es la miniatura que se ve al compartir el artículo en redes. Añádela (retirando antes la aprobación si hace falta).');
+                }
                 $a->fecha_publicacion = $fechaPublicacion; // para que la comprobación la vea
                 $problemas = ArticleGate::problems($a);
                 if ($problemas) {
@@ -91,6 +101,11 @@ final class ArticleWorkflow
                 break;
 
             case 'retirar_aprobacion':
+                $cambios = ['fecha_aprobacion' => null, 'robots' => 'noindex,nofollow'];
+                break;
+
+            case 'despublicar':
+                // Se conserva fecha_publicacion (la original); al volver a publicar se confirma la fecha.
                 $cambios = ['fecha_aprobacion' => null, 'robots' => 'noindex,nofollow'];
                 break;
 
@@ -115,6 +130,51 @@ final class ArticleWorkflow
                 'estado_nuevo' => $def['to'],
                 'usuario' => $user->name.' <'.$user->email.'>',
                 'nota' => $nota !== null && $nota !== '' ? mb_substr($nota, 0, 500) : null,
+            ]);
+        });
+    }
+
+    public static function puedeRevisionLegal(Article $a, User $user): bool
+    {
+        return $user->is_active && ! $a->isLocked() && $user->hasRole(UserRole::Admin, UserRole::Legal);
+    }
+
+    /**
+     * Cambia la revisión legal. Solo el revisor legal o el administrador, con nota obligatoria, y queda en el historial.
+     * No se puede en un artículo aprobado o publicado (hay que retirar antes la aprobación).
+     *
+     * @throws DomainException
+     */
+    public static function revisionLegal(Article $a, User $user, string $valor, string $nota): void
+    {
+        if (! array_key_exists($valor, C::REVISIONES_LEGALES)) {
+            throw new DomainException('Valor de revisión legal no válido.');
+        }
+        if (! self::puedeRevisionLegal($a, $user)) {
+            throw new DomainException('Solo el revisor legal o el administrador pueden marcar la revisión legal, y no en un artículo aprobado o publicado.');
+        }
+        $nota = trim($nota);
+        if ($nota === '') {
+            throw new DomainException('Escribe quién revisó y qué se decidió: queda en el historial.');
+        }
+        if ($valor === $a->revision_legal) {
+            return;
+        }
+
+        DB::transaction(function () use ($a, $user, $valor, $nota) {
+            $anterior = $a->revision_legal;
+            Article::$cambioLegalAutorizado = true;
+            try {
+                $a->forceFill(['revision_legal' => $valor])->save();
+            } finally {
+                Article::$cambioLegalAutorizado = false;
+            }
+            ArticleStatusLog::create([
+                'article_id' => $a->id,
+                'estado_anterior' => 'legal: '.$anterior,
+                'estado_nuevo' => 'legal: '.$valor,
+                'usuario' => $user->name.' <'.$user->email.'>',
+                'nota' => mb_substr($nota, 0, 500),
             ]);
         });
     }

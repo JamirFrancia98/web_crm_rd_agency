@@ -19,6 +19,7 @@ class CreateArticle extends CreateRecord
         $base = filled($data['id_tema'] ?? null) ? $data['id_tema'] : 'N'.Str::upper(Str::random(5));
         $data['post_ref'] = $base.'-'.$data['idioma'];
         $data['fecha_borrador'] = now()->toDateString();
+        $data['created_by'] = auth()->id();
         $data['word_count'] = str_word_count(strip_tags((string) ($data['body_md'] ?? '')));
 
         return $data;

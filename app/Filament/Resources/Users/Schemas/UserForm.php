@@ -29,7 +29,7 @@ class UserForm
                     ->options(UserRole::options())
                     ->required()
                     ->default(UserRole::Revisor->value)
-                    ->helperText('Administrador: todo. Editor: escribe y gestiona clientes, no aprueba. Revisor: aprueba artículos, lectura en el resto.'),
+                    ->helperText('Administrador: todo. Editor: escribe y gestiona clientes, no aprueba. Revisor: aprueba artículos. Revisor legal: marca la revisión legal de los artículos con riesgo.'),
                 Toggle::make('is_active')
                     ->label('Activo')
                     ->default(true)

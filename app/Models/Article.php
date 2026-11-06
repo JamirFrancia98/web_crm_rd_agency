@@ -49,8 +49,17 @@ class Article extends Model
         ];
     }
 
+    /** Lo activa solo ArticleWorkflow::revisionLegal(): la revisión legal no se cambia por ningún otro camino. */
+    public static bool $cambioLegalAutorizado = false;
+
     protected static function booted(): void
     {
+        static::updating(function (Article $a) {
+            if ($a->isDirty('revision_legal') && ! self::$cambioLegalAutorizado) {
+                throw new DomainException('La revisión legal solo la marca el revisor legal o el administrador, desde la acción del artículo.');
+            }
+        });
+
         // Lo aprobado es lo que se revisó: no se cambia el contenido sin devolverlo antes a revisión.
         static::updating(function (Article $a) {
             if (! in_array($a->getOriginal('estado'), BlogCatalog::COMPILABLES, true)) {
@@ -61,6 +70,11 @@ class Article extends Model
                 throw new DomainException('El artículo está '.$a->getOriginal('estado').' y no se puede editar. Devuélvelo a revisión primero (cambia: '.implode(', ', $cambios).').');
             }
         });
+    }
+
+    public function creador(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
     }
 
     public function sources(): HasMany

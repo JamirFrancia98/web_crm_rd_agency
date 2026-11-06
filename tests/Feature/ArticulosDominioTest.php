@@ -132,11 +132,134 @@ class ArticulosDominioTest extends TestCase
             $this->assertStringContainsString('fecha de publicación', $e->getMessage());
         }
 
+        // Sin portada no se publica: es la miniatura al compartir.
+        try {
+            ArticleWorkflow::aplicar($a->fresh(), 'publicar', $admin, null, '2026-11-20');
+            $this->fail('Debió exigir la portada');
+        } catch (DomainException $e) {
+            $this->assertStringContainsString('portada', $e->getMessage());
+        }
+        $this->assertSame('aprobado', $a->fresh()->estado);
+
+        $this->conPortada($a);
         ArticleWorkflow::aplicar($a->fresh(), 'publicar', $admin, null, '2026-11-20');
         $b = $a->fresh();
         $this->assertSame('publicado', $b->estado);
         $this->assertSame('2026-11-20', $b->fecha_publicacion->toDateString());
         $this->assertSame('index,follow', $b->robots);
+    }
+
+    /** Pone la portada sin pasar por la edición normal (el artículo ya está aprobado y bloqueado). */
+    private function conPortada(Article $a): void
+    {
+        Article::whereKey($a->id)->update(['imagen_src' => '/img/blog/portada.webp', 'imagen_alt' => 'Portada', 'imagen_licencia' => 'Propia']);
+    }
+
+    public function test_despublicar_permite_editar_y_volver_a_publicar(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $revisor = User::factory()->revisor()->create();
+        $a = $this->listo(attrs: ['imagen_src' => '/img/blog/portada.webp', 'imagen_alt' => 'Portada', 'imagen_licencia' => 'Propia']);
+        ArticleWorkflow::aplicar($a, 'aprobar', $revisor);
+        ArticleWorkflow::aplicar($a->fresh(), 'publicar', $admin, null, '2026-11-20');
+
+        // Publicado: no se edita.
+        $p = $a->fresh();
+        $p->titulo = 'Título corregido después de publicar';
+        try {
+            $p->save();
+            $this->fail('Debió bloquearse');
+        } catch (DomainException) {
+        }
+
+        // Solo admin y revisor despublican, y con motivo.
+        $this->assertFalse(ArticleWorkflow::puede($a->fresh(), 'despublicar', User::factory()->editor()->create()));
+        try {
+            ArticleWorkflow::aplicar($a->fresh(), 'despublicar', $revisor, '  ');
+            $this->fail('Debió pedir motivo');
+        } catch (DomainException $e) {
+            $this->assertStringContainsString('motivo', $e->getMessage());
+        }
+
+        ArticleWorkflow::aplicar($a->fresh(), 'despublicar', $revisor, 'Corregir una cifra');
+        $b = $a->fresh();
+        $this->assertSame('en revisión', $b->estado);
+        $this->assertSame('noindex,nofollow', $b->robots);
+        $this->assertNull($b->fecha_aprobacion);
+
+        $b->titulo = 'Título corregido después de publicar';
+        $b->save();
+        $this->assertSame('Título corregido después de publicar', $b->fresh()->titulo);
+
+        // Hay que volver a aprobar y a publicar.
+        ArticleWorkflow::aplicar($b->fresh(), 'aprobar', $revisor);
+        ArticleWorkflow::aplicar($b->fresh(), 'publicar', $admin, null, '2026-11-25');
+        $c = $a->fresh();
+        $this->assertSame('publicado', $c->estado);
+        $this->assertSame('index,follow', $c->robots);
+        $this->assertSame('Título corregido después de publicar', $c->titulo);
+        $this->assertGreaterThanOrEqual(5, ArticleStatusLog::where('article_id', $a->id)->count());
+    }
+
+    public function test_quien_escribe_el_articulo_no_lo_aprueba(): void
+    {
+        $autor = User::factory()->revisor()->create();
+        $a = $this->listo(attrs: ['created_by' => $autor->id]);
+
+        try {
+            ArticleWorkflow::aplicar($a, 'aprobar', $autor);
+            $this->fail('Debió bloquearse');
+        } catch (DomainException $e) {
+            $this->assertStringContainsString('no lo aprueba', $e->getMessage());
+        }
+
+        ArticleWorkflow::aplicar($a->fresh(), 'aprobar', User::factory()->revisor()->create());
+        $this->assertSame('aprobado', $a->fresh()->estado);
+    }
+
+    public function test_revision_legal_solo_legal_o_admin_con_nota_e_historial(): void
+    {
+        $a = $this->listo(attrs: ['riesgo_legal' => 'datos-personales', 'revision_legal' => 'pendiente']);
+        $legal = User::factory()->create(['role' => 'legal']);
+
+        foreach ([User::factory()->editor()->create(), User::factory()->revisor()->create()] as $otro) {
+            try {
+                ArticleWorkflow::revisionLegal($a, $otro, 'aprobada', 'ok');
+                $this->fail('Solo legal o admin');
+            } catch (DomainException) {
+            }
+        }
+        $this->assertSame('pendiente', $a->fresh()->revision_legal);
+
+        // La revisión legal no se cambia por el camino normal de edición.
+        $x = $a->fresh();
+        $x->revision_legal = 'aprobada';
+        try {
+            $x->save();
+            $this->fail('Debió bloquearse');
+        } catch (DomainException) {
+        }
+
+        try {
+            ArticleWorkflow::revisionLegal($a, $legal, 'aprobada', '  ');
+            $this->fail('Debió pedir nota');
+        } catch (DomainException) {
+        }
+
+        ArticleWorkflow::revisionLegal($a, $legal, 'aprobada', 'Abogado X revisó el texto el 2026-11-06');
+        $this->assertSame('aprobada', $a->fresh()->revision_legal);
+        $log = ArticleStatusLog::where('article_id', $a->id)->latest('id')->first();
+        $this->assertSame('legal: aprobada', $log->estado_nuevo);
+        $this->assertStringContainsString($legal->email, $log->usuario);
+
+        // El rol legal no aprueba ni publica artículos.
+        $this->assertFalse(ArticleWorkflow::puede($a->fresh(), 'aprobar', $legal));
+        // Ya aprobable, y el flag no queda activado.
+        $this->assertFalse(Article::$cambioLegalAutorizado);
+        ArticleWorkflow::aplicar($a->fresh(), 'aprobar', User::factory()->revisor()->create());
+
+        // Aprobado: ya no se toca la revisión legal.
+        $this->assertFalse(ArticleWorkflow::puedeRevisionLegal($a->fresh(), $legal));
     }
 
     public function test_un_usuario_inactivo_no_puede_mover_estados(): void

@@ -22,6 +22,8 @@ Entrar en `http://127.0.0.1:8000/admin`. En el primer acceso el panel pide confi
 php artisan db:seed --class=CompanyProfileSeeder            # datos confirmados de la empresa (no pisa lo existente)
 php artisan crm:importar-articulos <ruta>/blog_posts.json   # importa artículos (no pisa los existentes)
 php artisan crm:exportar-articulos <carpeta>                # exporta los aprobados a .md con el formato de la web
+php artisan crm:importar-redes <ruta>/social/linkedin       # piezas y calendario de LinkedIn (no pisa las existentes)
+php artisan crm:importar-documentos <carpeta de negocio>    # biblioteca de documentos de solo lectura (lista cerrada de rutas)
 ```
 
 ## Reglas
