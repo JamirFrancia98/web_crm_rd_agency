@@ -27,6 +27,13 @@ class ExportarArticulos extends Command
             $out = ArticleMarkdown::export($a);
             file_put_contents($carpeta.'/'.$out['filename'], $out['content']);
             $this->line('  '.$out['filename']);
+            // La imagen va junto al artículo, en la misma ruta que usa la web (img/blog/<archivo>).
+            $disco = \Illuminate\Support\Facades\Storage::disk('public');
+            if (filled($a->imagen_archivo) && $disco->exists($a->imagen_archivo)) {
+                @mkdir($carpeta.'/img/blog', 0755, true);
+                file_put_contents($carpeta.'/img/blog/'.basename($a->imagen_archivo), $disco->get($a->imagen_archivo));
+                $this->line('    + img/blog/'.basename($a->imagen_archivo));
+            }
             $n++;
         }
         $this->info("{$n} artículos exportados a {$carpeta}. Copiarlos a la web y publicarlos sigue siendo un paso manual aprobado por Jamir.");

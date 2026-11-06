@@ -19,6 +19,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // El CRM está solo en español, aunque el .env traiga otro idioma.
+        config(['app.locale' => 'es']);
+        app()->setLocale('es');
     }
 }

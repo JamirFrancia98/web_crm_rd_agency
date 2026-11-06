@@ -6,7 +6,11 @@ use App\Enums\UserRole;
 use App\Models\Article;
 use App\Services\Blog\ArticleGate;
 use App\Support\BlogCatalog as C;
+use App\Support\Portada;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\FileUpload;
+use Illuminate\Support\Str;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Filament\Forms\Components\MarkdownEditor;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -28,10 +32,11 @@ class ArticleForm
         // Bloqueado: aprobado/publicado, o quien solo revisa lo legal (lee, no edita el texto).
         $bloqueado = fn (?Article $record): bool => (bool) $record?->isLocked() || auth()->user()?->role === UserRole::Legal;
 
-        return $schema->components([
-            // Estado y lista de pendientes: lo primero que ve quien revisa.
+        return $schema->columns(1)->components([
+            // Estado y lista de pendientes: lo primero que ve quien revisa. Ancho completo, avisos en dos columnas.
             Section::make('Estado del artículo')
-                ->columns(1)
+                ->columnSpanFull()
+                ->columns(2)
                 ->visible(fn (?Article $record) => $record !== null)
                 ->schema([
                     TextEntry::make('estado')->label('Estado actual')->badge()
@@ -71,13 +76,17 @@ class ArticleForm
                             ->validationMessages(['regex' => 'Solo minúsculas, números y guiones, sin fecha.'])
                             ->unique(ignoreRecord: true, modifyRuleUsing: fn ($rule, Get $get) => $rule->where('idioma', $get('idioma')))
                             ->columnSpan(2),
-                        Select::make('idioma')->label('Idioma')->options(C::IDIOMAS)->required()->default('es')->live(),
+                        // El idioma se elige al crear y no cambia: cada idioma es su propio artículo (el texto no se traduce solo).
+                        Select::make('idioma')->label('Idioma')->options(C::IDIOMAS)->required()->default('es')->live()
+                            ->disabled(fn (?Article $record) => $record !== null)->dehydrated()
+                            ->helperText(fn (?Article $record) => $record ? 'Fijo: este texto está escrito en este idioma.' : 'Elige con cuidado: después no se puede cambiar.'),
                         Select::make('categoria')->label('Categoría')->options(C::CATEGORIAS)->required(),
                         Select::make('tipo')->label('Tipo')->options(C::TIPOS)->required()->default('guia'),
                         TextInput::make('id_tema')->label('Tema (ID)')->maxLength(8)->placeholder('T01'),
                         TextInput::make('grupo_traduccion')->label('Grupo de traducción')->maxLength(120)
                             ->helperText('Mismo texto en las versiones es/en/it del mismo artículo.')->columnSpan(2),
                     ]),
+                    View::make('filament.articles.traducciones')->visible(fn (?Article $record) => $record !== null)->columnSpanFull(),
                     MarkdownEditor::make('body_md')->label('Texto del artículo')->required()->minHeight('480px')
                         ->helperText('Usa «## Resumen» y «## Fuentes» para que la web los muestre como secciones propias.')
                         ->columnSpanFull(),
@@ -88,6 +97,31 @@ class ArticleForm
                         ->helperText('Lo que muestra Google. Ideal: hasta 60 caracteres.'),
                     Textarea::make('meta_description')->label('Meta descripción')->rows(3)->maxLength(300)
                         ->helperText('Ideal: entre 120 y 160 caracteres, sin promesas que no se puedan probar.'),
+                    Section::make('Imagen de portada')
+                        ->description('Una sola imagen: es el banner del artículo en la web y la miniatura al compartirlo en redes. No hay que subir dos.')
+                        ->columns(2)->schema([
+                            FileUpload::make('imagen_archivo')->label('Archivo de imagen')
+                                ->image()->disk('public')->directory('blog-portadas')->visibility('public')
+                                ->acceptedFileTypes(['image/webp', 'image/jpeg', 'image/png'])
+                                ->maxSize(Portada::MAX_KB_DURO)
+                                ->imageEditor()->imageCropAspectRatio('16:9')
+                                ->imageResizeMode('cover')->imageResizeTargetWidth((string) Portada::ANCHO)->imageResizeTargetHeight((string) Portada::ALTO)
+                                ->imagePreviewHeight('240')->openable()->downloadable()->live()
+                                ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file, Get $get): string => (Str::slug((string) $get('slug')) ?: 'portada').'.'.strtolower($file->getClientOriginalExtension()))
+                                ->helperText('Se ajusta a 16:9 al subirla. Máximo 1 MB; ideal menos de 200 KB y en WebP.')
+                                ->columnSpanFull(),
+                            TextEntry::make('imagen_medidas')->label('Medidas de la imagen guardada')
+                                ->state(fn (?Article $r) => Portada::resumen($r?->imagen_ancho, $r?->imagen_alto, $r?->imagen_bytes, $r?->imagen_archivo))
+                                ->helperText('Recomendado: '.Portada::ANCHO.'×'.Portada::ALTO.' px (16:9). Las redes muestran 1200×630 px: lo importante, en el centro. Se actualiza al guardar.'),
+                            TextEntry::make('imagen_ruta')->label('Ruta que usará la web')
+                                ->state(fn (?Article $r) => $r?->imagen_src ?: 'Se genera al subir la imagen')
+                                ->copyable()
+                                ->helperText('El archivo se copia a esa ruta al exportar o al publicar la web.'),
+                            TextInput::make('imagen_alt')->label('Texto alternativo')->maxLength(200)
+                                ->helperText('Describe la imagen. Obligatorio si hay imagen.'),
+                            TextInput::make('imagen_licencia')->label('Licencia o herramienta')->maxLength(200)
+                                ->helperText('Obligatoria si hay imagen: de dónde sale o con qué se creó.'),
+                        ]),
                     Section::make('Al compartir en redes')->description('Lo que se ve cuando alguien comparte el enlace (miniatura, título y descripción). Vacío = se usa el título y la descripción del artículo.')->columns(1)->schema([
                         TextInput::make('og_title')->label('Título para redes')->maxLength(90)->live(onBlur: true)
                             ->helperText('Ideal: hasta 60 caracteres.'),
@@ -120,13 +154,6 @@ class ArticleForm
                         TextInput::make('canonical_url')->label('URL canónica')->maxLength(300)->url(),
                         TextEntry::make('robots_info')->label('Indexación')
                             ->state(fn (?Article $record) => ($record?->robots ?? 'noindex,nofollow').' — pasa a index,follow solo al marcarlo como publicado.'),
-                    ]),
-                    Section::make('Imagen de portada')->columns(3)->schema([
-                        TextInput::make('imagen_src')->label('Ruta en la web')->maxLength(300)->placeholder('/img/blog/mi-articulo.webp')->live(onBlur: true)
-                            ->helperText('1920×1080, WebP, menos de 200 KB, sin texto dentro. Es la miniatura al compartir: sin ella no se puede marcar como publicado.'),
-                        TextInput::make('imagen_alt')->label('Texto alternativo')->maxLength(200),
-                        TextInput::make('imagen_licencia')->label('Licencia o herramienta')->maxLength(200)
-                            ->helperText('Obligatoria si hay imagen.'),
                     ]),
                 ]),
 

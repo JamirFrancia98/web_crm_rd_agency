@@ -71,7 +71,8 @@ class SocialPostResource extends Resource
     {
         $bloqueado = fn (?SocialPost $record): bool => (bool) $record?->isLocked() || ! (auth()->user()?->hasRole(UserRole::Admin, UserRole::Editor, UserRole::Revisor));
 
-        return $schema->components([
+        // Una sola columna: cada bloque a todo el ancho y en orden de lectura (estado, pieza, texto, historial).
+        return $schema->columns(1)->components([
             Section::make('Estado')->visible(fn (?SocialPost $r) => $r !== null)->columns(3)->schema([
                 TextEntry::make('estado')->label('Estado actual')->badge()
                     ->formatStateUsing(fn (string $state) => SocialPost::ESTADOS[$state] ?? $state)

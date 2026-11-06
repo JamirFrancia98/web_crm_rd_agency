@@ -5,6 +5,10 @@
 @endphp
 
 <div style="max-width: 760px;">
+    @php($banner = \App\Support\Portada::url($datos['imagen_archivo'] ?? null, trim((string) ($datos['imagen_src'] ?? '')) ?: null))
+    @if ($banner)
+        <img src="{{ $banner }}" alt="{{ $datos['imagen_alt'] ?? '' }}" style="width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 12px; margin-bottom: 16px;" loading="lazy">
+    @endif
     <h1 style="font-size: 26px; font-weight: 700; line-height: 1.25; margin-bottom: 6px;">{{ $datos['titulo'] ?? '' }}</h1>
     <p style="opacity: .75; margin-bottom: 18px;">{{ $datos['descripcion'] ?? '' }}</p>
     @if (trim($md) === '')

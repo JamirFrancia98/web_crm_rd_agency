@@ -54,6 +54,25 @@ class Article extends Model
 
     protected static function booted(): void
     {
+        // Al cambiar el archivo de portada se recalculan la ruta en la web y las medidas (no se escriben a mano).
+        static::saving(function (Article $a) {
+            if (! $a->isDirty('imagen_archivo')) {
+                return;
+            }
+            if (filled($a->imagen_archivo)) {
+                $m = \App\Support\Portada::medir($a->imagen_archivo);
+                $a->imagen_src = \App\Support\Portada::RUTA_WEB.basename($a->imagen_archivo);
+                $a->imagen_ancho = $m['ancho'] ?? null;
+                $a->imagen_alto = $m['alto'] ?? null;
+                $a->imagen_bytes = $m['bytes'] ?? null;
+            } else {
+                if (filled($a->getOriginal('imagen_archivo'))) {
+                    $a->imagen_src = null;
+                }
+                $a->imagen_ancho = $a->imagen_alto = $a->imagen_bytes = null;
+            }
+        });
+
         static::updating(function (Article $a) {
             if ($a->isDirty('revision_legal') && ! self::$cambioLegalAutorizado) {
                 throw new DomainException('La revisión legal solo la marca el revisor legal o el administrador, desde la acción del artículo.');

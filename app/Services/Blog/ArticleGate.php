@@ -90,6 +90,9 @@ final class ArticleGate
         if (! $a->imagen_src) {
             $w[] = 'Sin imagen de portada: se usará el arte por defecto de la web.';
         }
+        foreach (\App\Support\Portada::avisos($a->imagen_ancho, $a->imagen_alto, $a->imagen_bytes, $a->imagen_archivo) as $aviso) {
+            $w[] = $aviso;
+        }
         $n = mb_strlen(trim((string) $a->seo_title));
         if ($n === 0 || $n > 65) {
             $w[] = 'El título SEO debería tener entre 1 y 65 caracteres (tiene '.$n.').';

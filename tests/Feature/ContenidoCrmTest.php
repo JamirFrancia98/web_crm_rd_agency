@@ -245,6 +245,51 @@ MD);
             ->assertSee('revolutiondigital.agency/img/blog/portada.webp', escape: false);
     }
 
+    // ---- Imagen de portada e idioma ----
+
+    public function test_la_portada_subida_calcula_ruta_medidas_y_avisos(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+        $falsa = \Illuminate\Http\UploadedFile::fake()->image('x.png', 1000, 1000);
+        \Illuminate\Support\Facades\Storage::disk('public')->put('blog-portadas/mi-articulo.png', file_get_contents($falsa->getRealPath()));
+
+        $a = Article::factory()->estado('borrador')->create(['slug' => 'mi-articulo']);
+        $a->imagen_archivo = 'blog-portadas/mi-articulo.png';
+        $a->save();
+        $a->refresh();
+
+        $this->assertSame('/img/blog/mi-articulo.png', $a->imagen_src);
+        $this->assertSame([1000, 1000], [$a->imagen_ancho, $a->imagen_alto]);
+        $avisos = implode(' | ', \App\Services\Blog\ArticleGate::warnings($a));
+        $this->assertStringContainsString('no es 16:9', $avisos);
+        $this->assertStringContainsString('estrecha', $avisos);
+        $this->assertStringContainsString('WebP', $avisos);
+
+        // Quitar la imagen limpia ruta y medidas.
+        $a->imagen_archivo = null;
+        $a->save();
+        $this->assertNull($a->fresh()->imagen_src);
+        $this->assertNull($a->fresh()->imagen_ancho);
+    }
+
+    public function test_una_portada_16_9_no_da_avisos_de_medidas(): void
+    {
+        $this->assertSame([], \App\Support\Portada::avisos(1920, 1080, 120 * 1024, 'blog-portadas/x.webp'));
+        $this->assertSame('1920×1080 px · 16:9 · 120 KB · WEBP', \App\Support\Portada::resumen(1920, 1080, 120 * 1024, 'blog-portadas/x.webp'));
+    }
+
+    public function test_el_idioma_de_un_articulo_existente_no_se_puede_cambiar_y_se_ve_la_ficha_de_imagen(): void
+    {
+        $a = Article::factory()->conFuentes()->estado('borrador')->create(['idioma' => 'en']);
+        $this->como(User::factory()->editor()->create());
+
+        Livewire::test(EditArticle::class, ['record' => $a->getRouteKey()])
+            ->assertOk()
+            ->assertFormFieldIsDisabled('idioma')
+            ->assertSee('Versiones en otros idiomas')
+            ->assertSee('1920×1080');
+    }
+
     public function test_el_revisor_legal_lee_pero_no_edita_y_ve_la_accion_legal(): void
     {
         $a = Article::factory()->conFuentes()->estado('en revisión')->create(['riesgo_legal' => 'datos-personales', 'revision_legal' => 'pendiente']);

@@ -2,9 +2,9 @@
     $datos = (array) ($getLivewire()->data ?? []);
     $titulo = trim((string) ($datos['og_title'] ?? '')) ?: (trim((string) ($datos['seo_title'] ?? '')) ?: (string) ($datos['titulo'] ?? ''));
     $descripcion = trim((string) ($datos['og_description'] ?? '')) ?: (trim((string) ($datos['meta_description'] ?? '')) ?: (string) ($datos['descripcion'] ?? ''));
-    $imagen = trim((string) ($datos['imagen_src'] ?? ''));
     $dominio = 'revolutiondigital.agency';
-    $urlImagen = $imagen !== '' ? (str_starts_with($imagen, 'http') ? $imagen : 'https://'.$dominio.'/'.ltrim($imagen, '/')) : null;
+    // La imagen subida (aunque aún no esté guardada) manda; si no, la ruta de la web.
+    $urlImagen = \App\Support\Portada::url($datos['imagen_archivo'] ?? null, trim((string) ($datos['imagen_src'] ?? '')) ?: null);
 @endphp
 
 <div style="max-width: 520px; border: 1px solid rgba(128,128,128,.35); border-radius: 12px; overflow: hidden; font-family: system-ui, sans-serif;">
